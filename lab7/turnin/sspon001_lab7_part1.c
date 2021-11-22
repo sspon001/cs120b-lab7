@@ -14,14 +14,16 @@
 #include "simAVRHeader.h"
 #endif
 
-enum states {start, begin, init, reset, plus, minus, plusOn, minusOn, add, sub} state ;
-unsigned char temp = 0x00 ;
+enum states {init, begin, incr, decr, incrHold, decrHold, reset} state ;
+unsigned char pb ;
+unsigned char a ;
+unsigned short t ;
 
 volatile unsigned char TimerFlag = 0 ;
 unsigned long _avr_timer_M = 1 ;
 unsigned long _avr_timer_cntcurr = 0 ;
 void TimerISR() { 
-TimerFlag = 1 ;
+	TimerFlag = 1 ;
 }
 void TimerOn() {
 	TCCR1B = 0x0B ;
@@ -47,97 +49,111 @@ void TimerSet (unsigned long M) {
 }
 
 void Tick() {
-	if (PORTB == 0x00) LCD_DisplayString(1, "0") ;
-	else if (PORTB == 0x01) LCD_DisplayString(1, "1") ;
-	else if (PORTB == 0x02) LCD_DisplayString(1, "2") ;
-	else if (PORTB == 0x03) LCD_DisplayString(1, "3") ;
-	else if (PORTB == 0x04) LCD_DisplayString(1, "4") ;
-	else if (PORTB == 0x05) LCD_DisplayString(1, "5") ;
-	else if (PORTB == 0x06) LCD_DisplayString(1, "6") ;
-	else if (PORTB == 0x07) LCD_DisplayString(1, "7") ;
-	else if (PORTB == 0x08) LCD_DisplayString(1, "8") ;
-	else if (PORTB == 0x09) LCD_DisplayString(1, "9") ;
+	unsigned char a = (~PINA & 0x03) ;
 	switch(state) {
-		case start:
-			state = begin ;
+		case init:
 			break ;
 		case begin:
-			state = init ;
-			break ;
-		case init:
-			if ((~PINA & 0x03) == 0x03) state = reset ;
-			else if ((~PINA & 0x03) == 0x01) state = add ;
-			else if ((~PINA & 0x03) == 0x02) state = sub ;
+			if (a == 0x03) state = reset ; // 0x03 = 11 = both buttons pressed
+			else if ((~PINA & 0x03) == 0x01) state = incr ; // 0x01 = 01 = one button pressed
+			else if ((~PINA & 0x03) == 0x02) state = decr ; // 0x02 = 10 = one button pressed
 			break ;
 		case reset:
-			if ((~PINA & 0x03) == 0x03) state = reset ;
-			else state = init ;
+			if (a == 0x03) state = reset ; // 0x03 = 11 = both buttons pressed
+			else state = begin ;
 			break ;
-		case plus:
-			if ((~PINA & 0x03) == 0x01) state = plus ;
-                        else state = init ;
+		case incr:	
+			if (a == 0x03) state = reset ; // 0x03 = 11 = both buttons pressed
+			else if (a == 0x01) state = incrHold ; // if button is held after initial press
+			else state = begin ;
                         break ;
-		case add:
-			if (temp >= 0x0A) temp = 0x00 ;
-			state = plusOn ;
+		case incrHold:
+			if(a == 0x01) state = incrHold ; // if button is held, stay in state
+			else if(a == 0x03) state = reset ; // 0x03 = 11 = both buttons pressed
+			else state = begin ;
 			break ;
-		case sub:
-			if (temp >= 0x0A) temp = 0x00 ;
-			state = minusOn ;
-			break ;
-		case plusOn:
-			if ((~PINA & 0x03) == 0x01) {
-                                ++temp ;
-				state = plusOn ;
-				if (temp >= 0x0A) state = add ;
-                        }
-                        else state = plus ;
-			break ;
-		case minus:
-			if ((~PINA & 0x03) == 0x02) state = minus ;
-                        else state = init ;
+		case decr:
+			if (a == 0x03) state = reset ; // 0x03 = 11 = both buttons pressed
+			else if (a = 0x02) state = decrHold ; // if button is held after initial press
+			else state = begin ;
                         break ;
-		case minusOn:
-			if ((~PINA & 0x03) == 0x02) {
-                                state = minusOn ;
-				++temp ;
-				if (temp >= 0x0A) state = sub ;
-                        }
-                        else state = minus ;
+		case decrHold:
+			if(a == 0x02) state = decrHold ; // if button is held, stay in state
+			else if(a == 0x03) state = reset ; // 0x03 = 11 = both buttons pressed
+			else state = begin ;
 			break ;
 		default:
-			state = start ;
+			state = init ;
 			break ;
 	}
 	switch(state) {
-		case start:
-			PORTB = 0x07 ;
+		case init:
+			PORTB = 0x00 ;
+			state = begin ;
 			break ;
 		case begin:
-			PORTB = 0x07 ;
+			t = 0 ;
 			break ;
-		case init:
-			temp = 0x00 ;
-			break ;
-		case plusOn:
-			break ;
-		case minusOn:
-			break ;
-		case plus:
-			break ;
-		case minus:
-			break ;
-		case add:
-			if (PORTB < 0x09) PORTB = PORTB + 1 ;
+		case incr:
+			if(PORTB < 0x09) PORTB = PORTB + 1 ;
                         break ;
-		case sub:
-			if (PORTB > 0x00) PORTB = PORTB - 1 ;
+		case decr:
+			if(PORTB > 0x00) PORTB = PORTB - 1 ;
                         break ;
+		case incrHold:
+			if(t == 10){ // 100ms period means 10 ticks of t equals 1 second
+				if(PORTB < 0x09) PORTB = PORTB + 1 ;
+				t = 0 ;
+			}
+			else t++ ;
+			break ;
+		case decrHold:
+			if(t == 10){
+				if(PORTB > 0) PORTB = PORTB - 1 ;
+				t = 0 ;
+			}
+			else t++ ;
+			break ;
 		case reset:
 			PORTB = 0x00 ;
 			break ;
 		default:
-			PORTB = 0x07 ;
+			PORTB = 0x00 ;
+			break ;
+	}
+	pb = PORTB ; // output to LCD screen
+	switch(pb){	
+		case 0x00:
+			LCD_DisplayString(1,"0") ;
+			break ;
+		case 0x01:
+			LCD_DisplayString(1,"1") ;
+			break ;
+		case 0x02:
+			LCD_DisplayString(1,"2") ;
+			break ;
+		case 0x03:
+			LCD_DisplayString(1,"3") ;
+			break ;
+		case 0x04:
+			LCD_DisplayString(1,"4") ;
+			break ;
+		case 0x05:
+			LCD_DisplayString(1,"5") ;
+			break ;
+		case 0x06:
+			LCD_DisplayString(1,"6") ;
+			break ;
+		case 0x07:
+			LCD_DisplayString(1,"7") ;
+			break ;
+		case 0x08:
+			LCD_DisplayString(1,"8") ;
+			break ;
+		case 0x09:
+			LCD_DisplayString(1,"9") ;
+			break ;
+		default:
 			break ;
 	}
 }

@@ -1,22 +1,24 @@
 /*	Author: sspon001
  *  Partner(s) Name: 
  *	Lab Section:
- *	Assignment: Lab 7  Exercise 1
+ *	Assignment: Lab 7  Exercise 2
  *	Exercise Description: [optional - include for your own benefit]
  *
  *	I acknowledge all content contained herein, excluding template or example
  *	code, is my own original work.
  */
 #include <avr/io.h>
-#include "../header/io.h"
 #include <avr/interrupt.h>
+#include "../header/io.h"
 #ifdef _SIMULATE_
 #include "simAVRHeader.h"
 #endif
 
-enum states {start, init, next, press, rr} state ;
-unsigned char alternate = 0x00 ;
-unsigned char score = 0x05 ;
+enum BlinkStates {initB, blink} blinkState ;
+enum GameStates {initG, idle, press, release, press2} gameState ;
+unsigned char pb ;
+unsigned char a ;
+unsigned char t, temp, score ;
 
 volatile unsigned char TimerFlag = 0 ;
 unsigned long _avr_timer_M = 1 ;
@@ -48,92 +50,128 @@ void TimerSet (unsigned long M) {
 }
 
 void Tick() {
-	if(score == 0x00) LCD_DisplayString(1, "0") ;
-	else if(score == 0x01) LCD_DisplayString(1, "1") ;
-	else if(score == 0x02) LCD_DisplayString(1, "2") ;
-	else if(score == 0x03) LCD_DisplayString(1, "3") ;
-	else if(score == 0x04) LCD_DisplayString(1, "4") ;
-	else if(score == 0x05) LCD_DisplayString(1, "5") ;
-	else if(score == 0x06) LCD_DisplayString(1, "6") ;
-	else if(score == 0x07) LCD_DisplayString(1, "7") ;
-	else if(score == 0x08) LCD_DisplayString(1, "8") ;
-	else if(score == 0x09) {
-                LCD_DisplayString(1, "9") ;
-		LCD_DisplayString(2, "Victory!") ;
-        }
-
-	switch(state) {
-		case start:	
-				state = init ; 
-				break ;
-		case init:	
-				state = next ; 
-				break ;
-		case next:	
-				if((~PINA & 0x01) == 0x01) state = press ;
-				else state = next ;
-			       	break ;
-		case press:	
-				if((~PINA & 0x01) == 0x01) state = press ;
-				else state = rr ;
-				break ;
-		case rr:	
-				if((~PINA & 0x01) == 0x01) state = init ;
-				else state = rr ;
-				break ;
-		default:	
-				state = start ; 
-				break ;
+	a = (~PINA & 0x01) ;
+	switch(blinkState) {
+		case initB:
+			t = 0 ;
+			PORTB = 0x01 ;
+			blinkState = blink ;
+			break ;
+	        case blink: // blink leds in sequence every 300 ms
+			switch(t){
+				case 0x03:
+					PORTB = 0x02 ;
+					break ;
+				case 0x06:
+					PORTB = 0x04 ;
+					break ;
+				case 0x09:
+					PORTB = 0x02 ;
+					break ;
+				case 0x0C:
+					PORTB = 0x01 ;
+					t = 0 ;
+					break ;
+				default:
+					break ;
+			}
+			t++ ;
+			break ;
+		default:
+			break ;
 	}
-	switch (state) {
-		case start:     
-				score = 0x05 ;
-				break ;
-                case init:      
-				PORTB = 0x01 ; 
-				break ;
-		case next:
-				if(alternate == 0x00) {
-					if(PORTB == 0x04) {
-						PORTB = PORTB >> 1 ;
-						alternate = 0x01 ;
-					}
-					else PORTB = PORTB << 1 ;
-				}
-				else {
-					if(PORTB == 0x01) {
-              	                        	PORTB = PORTB << 1 ;
-                                        	alternate = 0x00 ;
-                                	}
-                                	else PORTB = PORTB >> 1 ;
-				}
-				break ;
-		case press: 	
-				if(PORTB == 0x02) score++ ;
-				else {
-					if(score > 0) score-- ;
-                                }
-				state = next ;
-				break ;
-		case rr:	
-				break ;
-                default:       
-				break ;
+	switch(gameState){
+		case initG:
+			gameState = idle ;
+			score = 0x05 ;
+			break ;
+		case idle: // wait for user input
+			temp = PORTB ;
+			if(a == 0x00) gameState = idle ;
+			else if(a == 0x01) gameState = press ;
+			break ;
+		case press: // user input, if pressed when PORTB = 0x02, then score incr, otherwise score decr
+			PORTB = temp ;
+			if(a == 0x01) gameState = press ;
+			else if(a == 0x00) gameState = release ;
+			if(PORTB == 0x02){
+				if(score < 9) score++ ;
+			}
+			else{
+				if(score > 0) score-- ;
+			}
+			t-- ; // pauses the current LED sequence
+			break ;
+		case release: // on release of button, if score is 9 display victory screen, otherwise return to game
+			PORTB = temp ;
+			if(a == 0x00) gameState = release ;
+			else if(a == 0x01){
+				if(score < 9) gameState = idle ;
+				else gameState = press2 ;
+			}
+			t-- ;// pauses the current LED sequence
+			break ;
+		case press2: // when released, restart game
+			PORTB = temp ;	
+			t-- ;
+			if(a == 0x01) gameState = press2 ;
+			else if(a == 0x00){
+				gameState = initG ;
+				t = 0 ;
+				PORTB = 0x01 ;
+			}	
+			break ;
+		default:
+			break ;
+	}
+	switch(score){	// output current score to LCD
+		case 0x00:
+			LCD_DisplayString(1,"0") ;
+			break ;
+		case 0x01:
+			LCD_DisplayString(1,"1") ;
+			break ;
+		case 0x02:
+			LCD_DisplayString(1,"2") ;
+			break ;
+		case 0x03:
+			LCD_DisplayString(1,"3") ;
+			break ;
+		case 0x04:
+			LCD_DisplayString(1,"4") ;
+			break ;
+		case 0x05:
+			LCD_DisplayString(1,"5") ;
+			break ;
+		case 0x06:
+			LCD_DisplayString(1,"6") ;
+			break ;
+		case 0x07:
+			LCD_DisplayString(1,"7") ;
+			break ;
+		case 0x08:
+			LCD_DisplayString(1,"8") ;
+			break ;
+		case 0x09:
+			LCD_DisplayString(1,"Victory!") ;
+			break ;
+		default:
+			break ;
 	}
 }
-
 int main() {
     DDRA = 0x00 ; PORTA = 0xFF ;
     DDRB = 0xFF ; PORTB = 0x00 ;
     DDRC = 0xFF ; PORTC = 0x00 ;
     DDRD = 0xFF ; PORTD = 0x00 ;
-    TimerSet(300) ;
+    TimerSet(100) ;
     TimerOn() ;
     LCD_init() ;
+    blinkState = initB ;
+    gameState = initG ;
     while (1) {
 	Tick() ;
 	while(!TimerFlag) {} ;
 	TimerFlag = 0 ;
     }
-    return 1 ;
 }
